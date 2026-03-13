@@ -167,7 +167,20 @@ function addShiftRecord(textFile, shiftObj) {
 // ============================================================
 function setBonus(textFile, driverID, date, newValue) {
 
-   
+    let rows = fs.readFileSync(textFile,"utf8").trim().split("\n");
+
+    for(let i=0;i<rows.length;i++){
+
+        let cols = rows[i].split(",");
+
+        if(cols[0] === driverID && cols[2] === date){
+            cols[9] = newValue.toString();
+            rows[i] = cols.join(",");
+            break;
+        }
+    }
+
+    fs.writeFileSync(textFile, rows.join("\n"));
 }
 
 // ============================================================
@@ -175,7 +188,33 @@ function setBonus(textFile, driverID, date, newValue) {
 // ============================================================
 function countBonusPerMonth(textFile, driverID, month) {
 
-   
+    let rows = fs.readFileSync(textFile, "utf8").trim().split("\n");
+
+    let found = false;
+    let count = 0;
+
+    month = parseInt(month);
+
+    for (let row of rows) {
+
+        let cols = row.split(",");
+
+        if (cols[0] === driverID) {
+
+            found = true;
+
+            let m = parseInt(cols[2].split("-")[1]);
+
+            let bonus = cols[9].trim().toLowerCase();
+
+            if (m === month && bonus === "true")
+                count++;
+        }
+    }
+
+    if (!found) return -1;
+
+    return count;
 }
 
 // ============================================================
@@ -183,7 +222,24 @@ function countBonusPerMonth(textFile, driverID, month) {
 // ============================================================
 function getTotalActiveHoursPerMonth(textFile, driverID, month) {
 
+    let rows = fs.readFileSync(textFile,"utf8").trim().split("\n");
 
+    let total = 0;
+
+    for(let row of rows){
+
+        let cols = row.split(",");
+
+        if(cols[0] === driverID){
+
+            let m = parseInt(cols[2].split("-")[1]);
+
+            if(m === month)
+                total += hmsToSeconds(cols[7]);
+        }
+    }
+
+    return secondsToHHH(total);
 }
 
 // ============================================================
@@ -191,7 +247,54 @@ function getTotalActiveHoursPerMonth(textFile, driverID, month) {
 // ============================================================
 function getRequiredHoursPerMonth(textFile, rateFile, bonusCount, driverID, month) {
 
+    let shifts = fs.readFileSync(textFile,"utf8").trim().split("\n");
+    let rates = fs.readFileSync(rateFile,"utf8").trim().split("\n");
 
+    let dayOff;
+
+    for(let r of rates){
+        let c = r.split(",");
+        if(c[0] === driverID){
+            dayOff = c[1];
+            break;
+        }
+    }
+
+    let total = 0;
+
+    for(let row of shifts){
+
+        let cols = row.split(",");
+
+        if(cols[0] === driverID){
+
+            let date = cols[2];
+            let m = parseInt(date.split("-")[1]);
+
+            if(m === month){
+
+                let d = new Date(date);
+                let weekday = d.toLocaleDateString("en-US",{weekday:"long"});
+
+                if(weekday === dayOff) continue;
+
+                let quota;
+
+                if(d >= new Date("2025-04-10") && d <= new Date("2025-04-30"))
+                    quota = 6*3600;
+                else
+                    quota = 8*3600 + 24*60;
+
+                total += quota;
+            }
+        }
+    }
+
+    total -= bonusCount * 2 * 3600;
+
+    if(total < 0) total = 0;
+
+    return secondsToHHH(total);
 }
 
 // ============================================================
@@ -199,7 +302,44 @@ function getRequiredHoursPerMonth(textFile, rateFile, bonusCount, driverID, mont
 // ============================================================
 function getNetPay(driverID, actualHours, requiredHours, rateFile) {
 
-   
+    let rates = fs.readFileSync(rateFile,"utf8").trim().split("\n");
+
+    let basePay, tier;
+
+    for(let r of rates){
+        let c = r.split(",");
+        if(c[0] === driverID){
+            basePay = parseInt(c[2]);
+            tier = parseInt(c[3]);
+            break;
+        }
+    }
+
+    let actual = hmsToSeconds(actualHours);
+    let required = hmsToSeconds(requiredHours);
+
+    if(actual >= required) return basePay;
+
+    let missing = required - actual;
+
+    let allowance = {
+        1:50,
+        2:20,
+        3:10,
+        4:3
+    }[tier];
+
+    missing -= allowance*3600;
+
+    if(missing <= 0) return basePay;
+
+    let billable = Math.floor(missing/3600);
+
+    let deductionRate = Math.floor(basePay/185);
+
+    let deduction = billable * deductionRate;
+
+    return basePay - deduction;
 }
 
 module.exports = {
